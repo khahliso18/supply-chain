@@ -4,6 +4,8 @@ import json
 import time
 from typing import List, Dict, Any
 import pandas as pd
+import qrcode
+from io import BytesIO
 
 # -----------------------
 # Blockchain Class
@@ -29,13 +31,18 @@ class SupplyChainBlockchain:
         self.chain.append(block)
         return block
 
-    def add_transaction(self, product_id: int, actor: str, location: str, action: str, amount: float) -> int:
+    def add_transaction(self, product_id: int, actor: str, location: str, action: str,
+                        amount: float, batch: str, transport: str, notes: str, receiver: str) -> int:
         transaction = {
             "product_id": product_id,
             "actor": actor,
             "location": location,
             "action": action,
             "amount": amount,
+            "batch": batch,
+            "transport": transport,
+            "notes": notes,
+            "receiver": receiver,
             "timestamp": time.time()
         }
         self.pending_transactions.append(transaction)
@@ -72,12 +79,16 @@ class SupplyChainBlockchain:
             for tx in block["transactions"]:
                 if tx["product_id"] == product_id:
                     history.append({
+                        "block_index": block["index"],
                         "actor": tx["actor"],
                         "location": tx["location"],
                         "action": tx["action"],
                         "amount": tx["amount"],
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"])),
-                        "block_index": block["index"]
+                        "batch": tx["batch"],
+                        "transport": tx["transport"],
+                        "notes": tx["notes"],
+                        "receiver": tx["receiver"],
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"]))
                     })
         return history
 
@@ -91,17 +102,21 @@ class SupplyChainBlockchain:
                     "Action": tx["action"],
                     "Location": tx["location"],
                     "Amount": tx["amount"],
+                    "Batch": tx["batch"],
+                    "Transport": tx["transport"],
+                    "Notes": tx["notes"],
+                    "Receiver": tx["receiver"],
                     "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"])),
                     "Block": block["index"]
                 })
         return pd.DataFrame(rows)
+
 
 # -----------------------
 # Streamlit App
 # -----------------------
 st.set_page_config(page_title="🚚 Supply Chain Tracker", layout="wide")
 
-# Initialize blockchain
 if "supply_chain" not in st.session_state:
     st.session_state.supply_chain = SupplyChainBlockchain()
 
@@ -111,7 +126,7 @@ bc: SupplyChainBlockchain = st.session_state.supply_chain
 st.sidebar.title("🚚 Supply Chain Navigation")
 menu = st.sidebar.radio("Navigate", ["🏠 Home", "🆕 Register Product", "📦 Add Step", "🔍 Track Product", "📊 Ledger"])
 
-# --- Home / Dashboard ---
+# --- Home ---
 if menu == "🏠 Home":
     st.title("🚚 Blockchain Supply Chain Tracker")
     st.subheader("📊 Dashboard")
@@ -135,7 +150,7 @@ elif menu == "🆕 Register Product":
         product_id = bc.create_product()
         st.success(f"✅ Product #{product_id} registered!")
 
-# --- Add Supply Chain Step ---
+# --- Add Step ---
 elif menu == "📦 Add Step":
     st.header("📦 Add Supply Chain Step")
     with st.form("supply_form", clear_on_submit=True):
@@ -144,9 +159,14 @@ elif menu == "📦 Add Step":
         location = st.text_input("Location")
         action = st.text_input("Action/Status (e.g., 'Harvested', 'Shipped', 'Delivered')")
         amount = st.number_input("Amount/Quantity", min_value=0.0, step=0.01, format="%.2f")
+        batch = st.text_input("Batch ID")
+        transport = st.selectbox("Transport Mode", ["Truck", "Ship", "Air", "Rail", "Other"])
+        notes = st.text_area("Condition/Notes")
+        receiver = st.text_input("Receiver/Next Party")
+
         submitted = st.form_submit_button("Add Step")
         if submitted and actor and location and action:
-            bc.add_transaction(product_id, actor, location, action, amount)
+            bc.add_transaction(product_id, actor, location, action, amount, batch, transport, notes, receiver)
             block = bc.new_block(proof=123)
             st.success(f"✅ Step added for Product #{product_id} in Block {block['index']}.")
 
@@ -158,13 +178,19 @@ elif menu == "🔍 Track Product":
         history = bc.track_product(track_id)
         if history:
             st.success(f"📜 Product #{track_id} Supply Chain History:")
-            st.dataframe(pd.DataFrame(history)[["block_index", "actor", "action", "location", "amount", "timestamp"]].rename(
-                columns={"block_index": "Block", "actor": "Actor", "action": "Action", "location": "Location", "amount": "Amount", "timestamp": "Timestamp"}
-            ))
+            df = pd.DataFrame(history)
+            st.dataframe(df)
+
+            # Generate QR Code
+            qr_data = json.dumps(history, indent=2)
+            qr = qrcode.make(qr_data)
+            buf = BytesIO()
+            qr.save(buf, format="PNG")
+            st.image(buf.getvalue(), caption=f"QR Code for Product #{track_id}")
         else:
             st.error(f"❌ No record found for Product #{track_id}")
 
-# --- Ledger / Explorer ---
+# --- Ledger ---
 elif menu == "📊 Ledger":
     st.header("📊 Blockchain Ledger Explorer")
     for block in reversed(bc.chain):
