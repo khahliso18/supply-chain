@@ -3,6 +3,8 @@ import hashlib
 import json
 import time
 from typing import List, Dict, Any
+import qrcode
+from io import BytesIO
 
 # -----------------------
 # Blockchain Class
@@ -41,10 +43,16 @@ class SupplyChainBlockchain:
         self.pending_transactions.append(transaction)
         return product_id
 
-    def create_product(self) -> int:
+    def create_product(self, name: str) -> int:
         """Register a new product in the supply chain"""
         self.product_counter += 1
         product_id = self.product_counter
+        product_info = {
+            "product_id": product_id,
+            "name": name,
+            "timestamp": time.time()
+        }
+        self.pending_transactions.append(product_info)
         return product_id
 
     @staticmethod
@@ -73,16 +81,15 @@ class SupplyChainBlockchain:
         history = []
         for block in self.chain:
             for tx in block["transactions"]:
-                if tx["product_id"] == product_id:
+                if tx.get("product_id") == product_id:
                     history.append({
-                        "actor": tx["actor"],
-                        "location": tx["location"],
-                        "action": tx["action"],
+                        "actor": tx.get("actor", "System"),
+                        "location": tx.get("location", "-"),
+                        "action": tx.get("action", "-"),
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"])),
                         "block_index": block["index"]
                     })
         return history
-
 
 # -----------------------
 # Streamlit App
@@ -95,7 +102,7 @@ if "supply_chain" not in st.session_state:
 
 bc: SupplyChainBlockchain = st.session_state.supply_chain
 
-st.title("🚚 Blockchain-based Supply Chain Tracker")
+st.title("🚚 Blockchain-based Supply Chain Tracker with QR Codes")
 
 # Chain status
 col1, col2 = st.columns(2)
@@ -104,22 +111,34 @@ col2.metric("Is Chain Valid?", "✅ Yes" if bc.is_chain_valid() else "❌ No")
 
 # --- Register Product ---
 st.header("🆕 Register New Product")
-if st.button("Create Product"):
-    product_id = bc.create_product()
-    st.success(f"✅ Product #{product_id} registered!")
+with st.form("register_form", clear_on_submit=True):
+    product_name = st.text_input("Product Name")
+    submitted = st.form_submit_button("Create Product")
+    if submitted and product_name:
+        product_id = bc.create_product(product_name)
+        st.success(f"✅ Product #{product_id} ('{product_name}') registered!")
+
+        # Generate QR Code
+        qr = qrcode.QRCode(version=1, box_size=8, border=4)
+        qr.add_data(f"Product ID: {product_id} | Name: {product_name}")
+        qr.make(fit=True)
+        img = qr.make_image(fill="black", back_color="white")
+        buf = BytesIO()
+        img.save(buf)
+        st.image(buf, caption=f"QR Code for Product #{product_id}")
 
 # --- Add Supply Chain Step ---
 st.header("📦 Add Supply Chain Step")
 with st.form("supply_form", clear_on_submit=True):
-    product_id = st.number_input("Product ID", min_value=1, step=1)
+    product_id_step = st.number_input("Product ID", min_value=1, step=1)
     actor = st.selectbox("Actor", ["Farmer", "Wholesaler", "Distributor", "Retailer", "Customer"])
     location = st.text_input("Location")
     action = st.text_input("Action/Status (e.g., 'Harvested', 'Shipped', 'Delivered')")
-    submitted = st.form_submit_button("Add Step")
-    if submitted and actor and location and action:
-        bc.add_transaction(product_id, actor, location, action)
+    submitted_step = st.form_submit_button("Add Step")
+    if submitted_step and actor and location and action:
+        bc.add_transaction(product_id_step, actor, location, action)
         block = bc.new_block(proof=123)
-        st.success(f"✅ Step added for Product #{product_id} in Block {block['index']}.")
+        st.success(f"✅ Step added for Product #{product_id_step} in Block {block['index']}.")
 
 # --- Track Product ---
 st.header("🔍 Track Product")
@@ -137,6 +156,4 @@ if st.button("Track Product", key="track_btn"):
 st.header("📊 Blockchain Explorer")
 for block in reversed(bc.chain):
     with st.expander(f"Block {block['index']} (Hash: {block['hash'][:12]}...)"):
-        st.write("Previous Hash:", block.get("previous_hash"))
-        st.write("Hash:", block.get("hash"))
-        st.json(block.get("transactions", []))
+        st.write("Previous Hash:", block.get("pr
