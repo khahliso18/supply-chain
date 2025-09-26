@@ -4,8 +4,6 @@ import json
 import time
 from typing import List, Dict, Any
 import pandas as pd
-import qrcode
-from io import BytesIO
 
 # -----------------------
 # Blockchain Class
@@ -180,13 +178,6 @@ elif menu == "🔍 Track Product":
             st.success(f"📜 Product #{track_id} Supply Chain History:")
             df = pd.DataFrame(history)
             st.dataframe(df)
-
-            # Generate QR Code
-            qr_data = json.dumps(history, indent=2)
-            qr = qrcode.make(qr_data)
-            buf = BytesIO()
-            qr.save(buf, format="PNG")
-            st.image(buf.getvalue(), caption=f"QR Code for Product #{track_id}")
         else:
             st.error(f"❌ No record found for Product #{track_id}")
 
