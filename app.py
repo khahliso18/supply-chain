@@ -3,6 +3,7 @@ import hashlib
 import json
 import time
 from typing import List, Dict, Any
+import pandas as pd
 
 # -----------------------
 # Blockchain Class
@@ -29,13 +30,14 @@ class SupplyChainBlockchain:
         self.chain.append(block)
         return block
 
-    def add_transaction(self, product_id: int, actor: str, location: str, action: str) -> int:
+    def add_transaction(self, product_id: int, actor: str, location: str, action: str, amount: float) -> int:
         """Add a supply chain step as a transaction"""
         transaction = {
             "product_id": product_id,
             "actor": actor,
             "location": location,
             "action": action,
+            "amount": amount,
             "timestamp": time.time()
         }
         self.pending_transactions.append(transaction)
@@ -78,11 +80,27 @@ class SupplyChainBlockchain:
                         "actor": tx["actor"],
                         "location": tx["location"],
                         "action": tx["action"],
+                        "amount": tx["amount"],
                         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"])),
                         "block_index": block["index"]
                     })
         return history
 
+    def all_transactions_summary(self) -> pd.DataFrame:
+        """Return a summary of all transactions in tabular form"""
+        rows = []
+        for block in self.chain:
+            for tx in block["transactions"]:
+                rows.append({
+                    "Product ID": tx["product_id"],
+                    "Actor": tx["actor"],
+                    "Action": tx["action"],
+                    "Location": tx["location"],
+                    "Amount": tx["amount"],
+                    "Timestamp": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(tx["timestamp"])),
+                    "Block": block["index"]
+                })
+        return pd.DataFrame(rows)
 
 # -----------------------
 # Streamlit App
@@ -115,9 +133,10 @@ with st.form("supply_form", clear_on_submit=True):
     actor = st.selectbox("Actor", ["Farmer", "Wholesaler", "Distributor", "Retailer", "Customer"])
     location = st.text_input("Location")
     action = st.text_input("Action/Status (e.g., 'Harvested', 'Shipped', 'Delivered')")
+    amount = st.number_input("Amount/Quantity", min_value=0.0, step=0.01, format="%.2f")
     submitted = st.form_submit_button("Add Step")
     if submitted and actor and location and action:
-        bc.add_transaction(product_id, actor, location, action)
+        bc.add_transaction(product_id, actor, location, action, amount)
         block = bc.new_block(proof=123)
         st.success(f"✅ Step added for Product #{product_id} in Block {block['index']}.")
 
@@ -128,13 +147,22 @@ if st.button("Track Product", key="track_btn"):
     history = bc.track_product(track_id)
     if history:
         st.success(f"📜 Product #{track_id} Supply Chain History:")
-        for step in history:
-            st.write(f"- Block {step['block_index']}: {step['actor']} | {step['action']} | {step['location']} | {step['timestamp']}")
+        st.dataframe(pd.DataFrame(history)[["block_index", "actor", "action", "location", "amount", "timestamp"]].rename(
+            columns={"block_index": "Block", "actor": "Actor", "action": "Action", "location": "Location", "amount": "Amount", "timestamp": "Timestamp"}
+        ))
     else:
         st.error(f"❌ No record found for Product #{track_id}")
 
+# --- All Transactions Summary ---
+st.header("📊 All Transactions Summary")
+df_summary = bc.all_transactions_summary()
+if not df_summary.empty:
+    st.dataframe(df_summary)
+else:
+    st.info("No transactions yet.")
+
 # --- Blockchain Explorer ---
-st.header("📊 Blockchain Explorer")
+st.header("🔗 Blockchain Explorer")
 for block in reversed(bc.chain):
     with st.expander(f"Block {block['index']} (Hash: {block['hash'][:12]}...)"):
         st.write("Previous Hash:", block.get("previous_hash"))
